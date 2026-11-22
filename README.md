@@ -23,12 +23,19 @@ It is slow by design. That's the joke.
 
 ## How it works
 
-```
- records ──► pack ──► RS encode ──► 8x8 B/W blocks ──► frames ──► FFmpeg ──► .mp4
-                                                                              │
-                                                                       upload (unlisted)
-                                                                              │
- JSON ◄── slice ◄── RS decode ◄── threshold ◄── frames ◄── yt-dlp section ◄───┘
+```mermaid
+flowchart TD
+    subgraph Write
+        direction LR
+        records["records"] --> pack["pack"] --> rs_encode["RS encode"] --> blocks["8x8 B/W blocks"] --> frames_write["frames"] --> ffmpeg["FFmpeg"] --> mp4[".mp4"]
+    end
+
+    mp4 -->|"upload (unlisted)"| ytdlp
+
+    subgraph Read
+        direction LR
+        ytdlp["yt-dlp section"] --> frames_read["frames"] --> threshold["threshold"] --> rs_decode["RS decode"] --> slice["slice"] --> json["JSON"]
+    end
 ```
 
 1. **Pack:** Each customer is a fixed-size 512-byte JSON record, so `byte_offset = n * 512`.
@@ -52,6 +59,7 @@ youtube-as-a-database/
 ├── seed.py         # generates 1,000 fake customers
 ├── static/
 │   └── index.html  # UI with a very honest loading spinner
+├── schema.sql      # SQLite index schema DDL
 ├── requirements.txt
 └── README.md
 ```
@@ -142,13 +150,13 @@ curl http://localhost:8000/customer/402
 ## Roadmap
 
 - [x] Concept
-- [ ] `codec.py` with local round-trip test
-- [ ] Simulated compression test (re-encode at lower CRF)
-- [ ] SQLite index and segment reads
-- [ ] FastAPI and UI
-- [ ] Update and flush flow
+- [x] `codec.py` with local round-trip test
+- [x] Simulated compression test (re-encode at lower quality and resolution)
+- [x] SQLite index and segment reads
+- [x] FastAPI and UI
+- [x] Update and flush flow
+- [ ] Verify the `yt-dlp` section download against a real YouTube upload (the code exists, but it has only been tested through the local path)
 - [ ] Demo recording next to a 2 ms SQLite query
-
 ---
 
 ## Disclaimer

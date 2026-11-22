@@ -1,0 +1,176 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>YouTubeDB</title>
+<style>
+  :root {
+    --bg: #0b0c0e; --panel: #14161a; --line: #262a31; --text: #e6e8eb; --muted: #8b93a1;
+    --accent: #ff4d4d; --ok: #5ee0a0;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 15px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  main { max-width: 680px; margin: 0 auto; padding: 24px 16px 64px; }
+  header { display: flex; align-items: center; gap: 16px; margin-bottom: 8px; }
+  canvas { width: 160px; height: 60px; image-rendering: pixelated; border: 1px solid var(--line); border-radius: 6px; flex: none; }
+  h1 { margin: 0; font-size: 28px; letter-spacing: -0.5px; }
+  .tag { color: var(--muted); margin: 0 0 24px; }
+  .warn { border: 1px solid #5a2a2a; background: #1d1212; color: #ffb4b4; padding: 8px 12px; border-radius: 6px; font-size: 13px; margin-bottom: 24px; }
+  form { display: flex; gap: 8px; margin-bottom: 20px; }
+  input {
+    flex: 1; min-width: 0; background: var(--panel); border: 1px solid var(--line); color: var(--text);
+    padding: 10px 12px; border-radius: 6px; font: inherit;
+  }
+  button {
+    background: var(--accent); color: #fff; border: 0; padding: 10px 16px; border-radius: 6px;
+    font: inherit; font-weight: 600; cursor: pointer;
+  }
+  button:disabled { opacity: 0.5; cursor: progress; }
+  input:focus-visible, button:focus-visible { outline: 2px solid #fff; outline-offset: 2px; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; margin-bottom: 16px; }
+  .hidden { display: none; }
+  .bar { height: 6px; background: var(--line); border-radius: 3px; overflow: hidden; margin-top: 10px; }
+  .bar > div { height: 100%; width: 0; background: var(--accent); }
+  .spin { display: inline-block; animation: spin 0.9s steps(8) infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @media (prefers-reduced-motion: reduce) { .spin { animation: none; } }
+  pre { margin: 0; white-space: pre-wrap; word-break: break-word; }
+  .meta { color: var(--muted); font-size: 13px; margin-top: 12px; }
+  .meta b { color: var(--text); font-weight: 600; }
+  .ok { color: var(--ok); }
+  .err { color: #ff8a8a; }
+  small { color: var(--muted); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <canvas id="tv" width="160" height="60" aria-label="animated TV static" role="img"></canvas>
+    <h1>YouTubeDB</h1>
+  </header>
+  <p class="tag">Every row is a few frames of black-and-white noise.</p>
+
+  <form id="f">
+    <input id="id" type="number" min="1" value="402" aria-label="Customer id" required>
+    <button id="go" type="submit">SELECT * FROM static</button>
+  </form>
+
+  <div id="loading" class="card hidden" role="status" aria-live="polite">
+    <span class="spin" aria-hidden="true">&#9680;</span> <span id="msg">Starting...</span>
+    <div class="bar"><div id="fill"></div></div>
+  </div>
+
+  <div id="result" class="card hidden">
+    <pre id="json"></pre>
+    <div class="meta" id="meta"></div>
+  </div>
+
+  <small>The progress bar is theatre. The latency is real once the segment is read from YouTube.</small>
+</main>
+
+<script>
+// --- TV static banner -------------------------------------------------------
+(() => {
+  const c = document.getElementById("tv"), ctx = c.getContext("2d");
+  const img = ctx.createImageData(c.width, c.height);
+  const draw = () => {
+    for (let i = 0; i < img.data.length; i += 4) {
+      const v = Math.random() < 0.5 ? 0 : 255;
+      img.data[i] = img.data[i + 1] = img.data[i + 2] = v;
+      img.data[i + 3] = 255;
+    }
+    ctx.putImageData(img, 0, 0);
+  };
+  draw();
+  if (!matchMedia("(prefers-reduced-motion: reduce)").matches) setInterval(draw, 90);
+})();
+
+// --- lookup ----------------------------------------------------------------
+const $ = (id) => document.getElementById(id);
+let timer = null;
+
+function startTheatre() {
+  const total = 30 + Math.floor(Math.random() * 30);
+  const t0 = performance.now();
+  $("loading").classList.remove("hidden");
+  $("result").classList.add("hidden");
+  timer = setInterval(() => {
+    const t = (performance.now() - t0) / 1000;
+    const pct = 92 * (1 - Math.exp(-t / 3));
+    $("fill").style.width = pct + "%";
+    const k = Math.max(1, Math.round((pct / 100) * total));
+    const msgs = [
+      "Looking up the id in the tiny index...",
+      "Asking YouTube nicely...",
+      `Downloading frame ${k}/${total}...`,
+      "Squinting at the static...",
+      "Reed-Solomon is doing its best...",
+    ];
+    $("msg").textContent = msgs[Math.min(msgs.length - 1, Math.floor(t / 1.2))];
+  }, 120);
+}
+
+function stopTheatre() {
+  clearInterval(timer);
+  $("fill").style.width = "100%";
+  setTimeout(() => $("loading").classList.add("hidden"), 250);
+}
+
+function addMeta(parts) {
+  const el = $("meta");
+  el.textContent = "";
+  parts.forEach(([label, value, cls], i) => {
+    if (i) el.append(document.createElement("br"));
+    el.append(label + " ");
+    const b = document.createElement("b");
+    b.textContent = value;
+    if (cls) b.className = cls;
+    el.append(b);
+  });
+}
+
+$("f").addEventListener("submit", async (e) => {
+  e.preventDefault();
+  const id = parseInt($("id").value, 10);
+  $("go").disabled = true;
+  startTheatre();
+  const t0 = performance.now();
+  try {
+    const res = await fetch(`/customer/${id}`);
+    const body = await res.json();
+    const wall = Math.round(performance.now() - t0);
+    stopTheatre();
+    $("result").classList.remove("hidden");
+    if (!res.ok) {
+      $("json").textContent = body.detail || res.statusText;
+      $("json").className = "err";
+      addMeta([["status", String(res.status), "err"]]);
+    } else {
+      $("json").className = "";
+      $("json").textContent = JSON.stringify(body.customer, null, 2);
+      const m = body.meta;
+      addMeta([
+        ["segment", `${m.segment} (${m.source})`],
+        ["frames", `${m.frames[0]}-${m.frames[1]}, ${m.frames_scanned} scanned`],
+        ["Reed-Solomon repaired", `${m.rs_corrected_bytes} bytes`],
+        ["round trip", `${wall} ms`, "ok"],
+        ["SQLite would have taken", "~2 ms"],
+      ]);
+    }
+  } catch (err) {
+    stopTheatre();
+    $("result").classList.remove("hidden");
+    $("json").className = "err";
+    $("json").textContent = "Request failed: " + err;
+    addMeta([]);
+  } finally {
+    $("go").disabled = false;
+  }
+});
+</script>
+</body>
+</html>

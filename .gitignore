@@ -1,0 +1,13 @@
+# runtime data (videos + index)
+data/
+
+# python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# scratch
+*.mp4
+!tests/**/*.mp4
+.DS_Store
