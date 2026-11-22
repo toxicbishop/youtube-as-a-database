@@ -17,7 +17,7 @@ from typing import Optional
 
 from codec import decode_frames
 from store import YOUTUBE_ID, Store, unpack_record
-from video import read_video
+from video import _ffmpeg, read_video
 
 LOCAL_PAD = 0.25  # seconds of slack around the wanted frames (local files seek accurately)
 YOUTUBE_PAD = 2.0  # YouTube re-encodes, so section cuts land on its own keyframes
@@ -38,6 +38,7 @@ def download_section(youtube_id: str, start: float, end: float, out_dir: str | P
     out = Path(out_dir)
     cmd = [
         sys.executable, "-m", "yt_dlp", "--quiet", "--no-warnings", "--no-playlist",
+        "--ffmpeg-location", _ffmpeg(),
         "-f", "bv*[height<=1080]/bv*",
         "--download-sections", f"*{start:.2f}-{end:.2f}",
         "-o", str(out / "section.%(ext)s"),

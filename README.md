@@ -56,6 +56,7 @@ flowchart LR
 
 ```
 youtube-as-a-database/
+├── docs/           # Architecture, encoding science, API spec, and guides
 ├── codec.py        # bytes <-> frames (8x8 blocks, Reed-Solomon, per-frame CRC)
 ├── video.py        # frames <-> mp4 via FFmpeg
 ├── store.py        # append-only writer + SQLite index
