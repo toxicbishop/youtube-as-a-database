@@ -1,4 +1,4 @@
-# Youtube-as-a-Database
+# Youtube-DB
 
 > ⚠️ **Educational joke project. Do not store real or personal data on YouTube.** Use fake data only.
 
