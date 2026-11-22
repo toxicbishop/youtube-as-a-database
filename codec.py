@@ -37,12 +37,15 @@ class Geometry:
     height: int = 1080
     block: int = 8  # each bit is a block x block square of pixels
     nsym: int = 32  # Reed-Solomon parity bytes per 255-byte codeword
+    repeat: int = 3  # consecutive duplicate frames in video
 
     def __post_init__(self) -> None:
         if self.width % self.block or self.height % self.block:
             raise ValueError("width and height must be multiples of block")
         if not 2 <= self.nsym < CODEWORD - HEADER.size - 1:
             raise ValueError("nsym out of range")
+        if self.repeat < 1:
+            raise ValueError("repeat must be at least 1")
         if self.codewords < 1:
             raise ValueError("frame too small to hold one Reed-Solomon codeword")
 
@@ -197,8 +200,9 @@ def decode_frames(
             continue
         if frame is None:
             continue
-        report.payloads[frame.frame_no] = frame.payload
-        report.corrected += frame.corrected
+        if frame.frame_no not in report.payloads:
+            report.payloads[frame.frame_no] = frame.payload
+            report.corrected += frame.corrected
         if wanted is not None and all(n in report.payloads for n in wanted):
             break
     return report
@@ -207,10 +211,9 @@ def decode_frames(
 def decode_blob(images: Iterable[np.ndarray], geom: Geometry = Geometry()) -> bytes:
     """Decode every frame and return the original blob (frames may arrive in any order)."""
     report = decode_frames(images, geom)
-    if report.errors:
-        raise FrameError(f"{len(report.errors)} frame(s) failed: {report.errors[0]}")
     last = max(report.payloads, default=-1)
     missing = [n for n in range(last + 1) if n not in report.payloads]
     if missing:
-        raise FrameError(f"missing frames: {missing[:5]}")
+        err = report.errors[0] if report.errors else f"{len(missing)} missing frames"
+        raise FrameError(f"missing frames {missing[:5]}: {err}")
     return b"".join(report.payloads[n] for n in range(last + 1))

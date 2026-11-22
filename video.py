@@ -47,8 +47,10 @@ def write_video(
         proc = subprocess.Popen(cmd, stdin=subprocess.PIPE, stderr=err)
         try:
             for frame in frames:
-                proc.stdin.write(np.ascontiguousarray(frame, dtype=np.uint8).tobytes())
-                count += 1
+                raw_bytes = np.ascontiguousarray(frame, dtype=np.uint8).tobytes()
+                for _ in range(geom.repeat):
+                    proc.stdin.write(raw_bytes)
+                    count += 1
         except BrokenPipeError:
             pass  # ffmpeg died; its stderr explains why (below)
         finally:

@@ -92,6 +92,26 @@ def parse_video_id(value: str) -> str:
     raise ValueError(f"not a YouTube video id or URL: {value!r}")
 
 
+def check_hd_stream(video_id: str, min_height: int = 720) -> tuple[bool, int, list[int]]:
+    """Probe YouTube formats via yt-dlp to check if HD (>=720p) is available.
+    Returns (is_hd, max_height, sorted_heights)."""
+    import subprocess
+    import sys
+    try:
+        proc = subprocess.run(
+            [sys.executable, "-m", "yt_dlp", "--dump-json", "--no-warnings", "--no-playlist", f"https://www.youtube.com/watch?v={video_id}"],
+            capture_output=True, text=True, timeout=20,
+        )
+        if proc.returncode != 0 or not proc.stdout.strip():
+            return (False, 0, [])
+        info = json.loads(proc.stdout)
+        heights = sorted({f["height"] for f in info.get("formats", []) if f.get("height") and f.get("vcodec") != "none"})
+        max_h = max(heights) if heights else 0
+        return (max_h >= min_height, max_h, heights)
+    except Exception:
+        return (False, 0, [])
+
+
 # --------------------------------------------------------------------------- store
 
 
@@ -247,19 +267,65 @@ class Store:
                 "pending": one("SELECT COUNT(*) FROM pending"),
             }
 
+    def manifest(self, segment_name: str) -> dict:
+        seg = self.segment(segment_name)
+        with closing(self._connect()) as db:
+            count = db.execute("SELECT COUNT(*) FROM records WHERE segment=?", (segment_name,)).fetchone()[0]
+            ids = db.execute("SELECT MIN(id), MAX(id) FROM records WHERE segment=?", (segment_name,)).fetchone()
+        return {
+            "youtubedb": "v1",
+            "segment": seg.name,
+            "created_at": seg.created_at,
+            "record_range": [ids[0], ids[1]] if ids and ids[0] is not None else [0, 0],
+            "record_count": count,
+            "record_size": RECORD_SIZE,
+            "frames": seg.frames,
+            "fps": seg.fps,
+            "nbytes": seg.nbytes,
+            "geom": dataclasses.asdict(seg.geom),
+        }
+
+    def restore_from_manifest(self, manifest: dict, video_id: str) -> Segment:
+        name = manifest["segment"]
+        geom = Geometry(**manifest["geom"])
+        rel = f"videos/{name}.mp4"
+        now = manifest.get("created_at", time.time())
+        with closing(self._connect()) as db, db:
+            db.execute(
+                "INSERT OR REPLACE INTO segments VALUES (?,?,?,?,?,?,?,?)",
+                (name, rel, video_id, manifest["frames"], manifest["fps"], manifest["nbytes"], json.dumps(dataclasses.asdict(geom)), now),
+            )
+            r_start, r_end = manifest.get("record_range", [1, manifest.get("record_count", 0)])
+            count = manifest.get("record_count", (r_end - r_start + 1) if r_end >= r_start else 0)
+            if count > 0:
+                record_ids = list(range(r_start, r_start + count))
+                db.executemany(
+                    "INSERT INTO records(id, segment, byte_offset, length, updated_at) VALUES (?,?,?,?,?) "
+                    "ON CONFLICT(id) DO UPDATE SET segment=excluded.segment, "
+                    "byte_offset=excluded.byte_offset, length=excluded.length, updated_at=excluded.updated_at",
+                    [(rid, name, i * RECORD_SIZE, RECORD_SIZE, now) for i, rid in enumerate(record_ids)],
+                )
+        return self.segment(name)
+
 
 # --------------------------------------------------------------------------- CLI
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(prog="store.py", description="StaticDB index maintenance")
+    parser = argparse.ArgumentParser(prog="store.py", description="YouTubeDB index maintenance")
     parser.add_argument("--data-dir", help="defaults to $STATICDB_DIR or ./data")
     sub = parser.add_subparsers(dest="cmd", required=True)
     sub.add_parser("segments", help="list segments and their upload status")
     reg = sub.add_parser("register", help="record the YouTube id of an uploaded segment")
     reg.add_argument("--segment", required=True, help="e.g. seg_0001")
     reg.add_argument("--video-id", required=True, help="YouTube video id or URL")
+    reg.add_argument("--require-hd", action="store_true", help="verify YouTube has finished processing HD")
+    reg.add_argument("--force", action="store_true", help="force registration without HD check")
     sub.add_parser("flush", help="write pending updates into a new segment")
+    man = sub.add_parser("manifest", help="generate description manifest for a segment")
+    man.add_argument("--segment", required=True, help="e.g. seg_0001")
+    res = sub.add_parser("restore", help="reconstruct index from YouTube video description")
+    res.add_argument("--from-video", required=True, help="YouTube video id or URL")
     args = parser.parse_args(argv)
 
     store = Store(args.data_dir)
@@ -269,8 +335,39 @@ def main(argv: list[str] | None = None) -> int:
             print(f"{s.name:10} {s.frames:>6} {s.nbytes / 1024:>7.1f}  {s.youtube_id or '(local only)'}")
         print(store.stats())
     elif args.cmd == "register":
-        store.register(args.segment, args.video_id)
-        print(f"{args.segment} -> {parse_video_id(args.video_id)}")
+        vid = parse_video_id(args.video_id)
+        if args.require_hd and not args.force:
+            ok, max_h, heights = check_hd_stream(vid)
+            if not ok:
+                print(f"⏳ HD stream (>=720p) not ready for {vid} (highest: {max_h}p, formats: {heights}).")
+                print("Wait a few minutes for YouTube processing, or re-run with --force.")
+                return 1
+        store.register(args.segment, vid)
+        print(f"{args.segment} -> {vid}")
+    elif args.cmd == "manifest":
+        m = store.manifest(args.segment)
+        print(json.dumps(m, indent=2))
+    elif args.cmd == "restore":
+        import subprocess
+        import sys
+        vid = parse_video_id(args.from_video)
+        proc = subprocess.run(
+            [sys.executable, "-m", "yt_dlp", "--dump-json", "--no-warnings", f"https://www.youtube.com/watch?v={vid}"],
+            capture_output=True, text=True,
+        )
+        if proc.returncode != 0:
+            print(f"Failed to query YouTube video: {proc.stderr.strip()[-200:]}")
+            return 1
+        info = json.loads(proc.stdout)
+        desc = info.get("description", "")
+        # Look for youtubedb JSON in description
+        match = re.search(r'\{\s*"youtubedb"\s*:\s*"v1"[^}]*\}', desc, re.DOTALL)
+        if not match:
+            print("No YouTubeDB manifest found in video description.")
+            return 1
+        manifest = json.loads(match.group(0))
+        seg = store.restore_from_manifest(manifest, vid)
+        print(f"Restored {seg.name} ({manifest.get('record_count', 0)} records) from YouTube video {vid}")
     elif args.cmd == "flush":
         seg = store.flush()
         print(f"wrote {seg.name} ({seg.frames} frames): {store.video_path(seg)}" if seg else "nothing pending")

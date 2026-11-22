@@ -31,6 +31,7 @@ def test_geometry_defaults():
     assert GEOM.raw_bytes == 4050
     assert GEOM.codewords == 15
     assert GEOM.payload_per_frame == 3335
+    assert GEOM.repeat == 3
 
 
 def test_frame_roundtrip():

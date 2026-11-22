@@ -74,8 +74,8 @@ def fetch_record(store: Store, record_id: int, source: Optional[str] = None) -> 
 
     try:
         if from_youtube:
-            start = max(0.0, first / seg.fps - YOUTUBE_PAD)
-            end = (last + 1) / seg.fps + YOUTUBE_PAD
+            start = max(0.0, (first * geom.repeat) / seg.fps - YOUTUBE_PAD)
+            end = ((last + 1) * geom.repeat) / seg.fps + YOUTUBE_PAD
             with tempfile.TemporaryDirectory(prefix="staticdb-") as tmp:
                 section = download_section(seg.youtube_id, start, end, tmp)
                 report = decode_frames(read_video(section, geom), geom, wanted)
@@ -83,8 +83,8 @@ def fetch_record(store: Store, record_id: int, source: Optional[str] = None) -> 
             path = store.video_path(seg)
             if not path.exists():
                 raise RecordUnavailable(f"segment file missing: {path}")
-            start = max(0.0, first / seg.fps - LOCAL_PAD)
-            duration = (last + 1 - first) / seg.fps + 2 * LOCAL_PAD
+            start = max(0.0, (first * geom.repeat) / seg.fps - LOCAL_PAD)
+            duration = ((last + 1 - first) * geom.repeat) / seg.fps + 2 * LOCAL_PAD
             report = decode_frames(read_video(path, geom, start, duration), geom, wanted)
     except RuntimeError as exc:  # ffmpeg trouble; RecordUnavailable is a RuntimeError too
         if isinstance(exc, RecordUnavailable):

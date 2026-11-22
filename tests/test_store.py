@@ -56,7 +56,7 @@ def test_updates_are_append_only_with_eventual_consistency(store):
 
     segment = store.flush()
     assert segment.name == "seg_0002"
-    assert segment.frames == 1  # only the changed record was re-encoded
+    assert segment.frames == 3  # only the changed record was re-encoded (1 frame x 3 repeats)
     assert store.stats() == {"segments": 2, "uploaded_segments": 0, "records": 10, "pending": 0}
 
     record, meta = fetch_record(store, 3)

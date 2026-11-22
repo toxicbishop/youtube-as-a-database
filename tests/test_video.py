@@ -19,7 +19,7 @@ def encoded(tmp_path_factory):
 
 def test_frame_count(encoded):
     blob, _, frames = encoded
-    assert frames == frame_count(len(blob), GEOM) == 45
+    assert frames == frame_count(len(blob), GEOM) * GEOM.repeat == 45 * 3
 
 
 def test_video_roundtrip(encoded):
@@ -40,8 +40,8 @@ def test_section_read_finds_the_right_frames(encoded):
     blob, path, _ = encoded
     p = GEOM.payload_per_frame
     wanted = range(20, 23)
-    start = 20 / FPS - 0.25
-    duration = 3 / FPS + 0.5
+    start = (20 * GEOM.repeat) / FPS - 0.25
+    duration = (3 * GEOM.repeat) / FPS + 0.5
     report = decode_frames(read_video(path, GEOM, start, duration), GEOM, wanted)
     assert not report.errors
     assert sorted(report.payloads) == [20, 21, 22]
