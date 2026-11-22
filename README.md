@@ -24,17 +24,22 @@ It is slow by design. That's the joke.
 ## How it works
 
 ```mermaid
-flowchart TD
-    subgraph Write
-        direction LR
-        records["records"] --> pack["pack"] --> rs_encode["RS encode"] --> blocks["8x8 B/W blocks"] --> frames_write["frames"] --> ffmpeg["FFmpeg"] --> mp4[".mp4"]
+flowchart LR
+    subgraph Write ["Write Pipeline"]
+        direction TB
+        w1["Records (JSON)"] --> w2["Pack & RS Encode"]
+        w2 --> w3["8x8 B/W Frames"]
+        w3 --> w4["FFmpeg (.mp4)"]
     end
 
-    mp4 -->|"upload (unlisted)"| ytdlp
+    w4 -->|"Upload"| YT[("YouTube (Unlisted)")]
+    YT -->|"yt-dlp section"| r1
 
-    subgraph Read
-        direction LR
-        ytdlp["yt-dlp section"] --> frames_read["frames"] --> threshold["threshold"] --> rs_decode["RS decode"] --> slice["slice"] --> json["JSON"]
+    subgraph Read ["Read Pipeline"]
+        direction TB
+        r1["Download Section"] --> r2["Extract Frames"]
+        r2 --> r3["Threshold & RS Decode"]
+        r3 --> r4["JSON Record"]
     end
 ```
 
